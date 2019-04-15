@@ -112,11 +112,11 @@ ENABLE_PROXY_FIX = False
 # GLOBALS FOR APP Builder
 # ------------------------------
 # Uncomment to setup Your App name
-APP_NAME = 'Superset'
+APP_NAME = '数据自助平台'
 
 # Uncomment to setup an App icon
-APP_ICON = '/static/assets/images/superset-logo@2x.png'
-APP_ICON_WIDTH = 126
+APP_ICON = '/static/assets/images/hbgj.png'
+APP_ICON_WIDTH = 25
 
 # Uncomment to specify where clicking the logo would take the user
 # e.g. setting it to '/welcome' would take the user to '/superset/welcome'
