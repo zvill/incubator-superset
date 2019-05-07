@@ -2096,6 +2096,7 @@ export const controls = {
     type: 'ColorMapControl',
     label: t('Color Map'),
     default: {},
+    renderTrigger: true,
     mapStateToProps: state => ({
       colorNamespace: state.form_data.color_namespace,
       colorScheme: state.form_data.color_scheme,
