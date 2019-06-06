@@ -60,6 +60,7 @@ class QueryView(SupersetModelView):
     edit_title = _('Edit Query')
 
     list_columns = ['username', 'database_name', 'status', 'start_time', 'end_time']
+    order_columns = ['status', 'start_time', 'end_time']
     base_filters = [['id', QueryFilter, lambda: []]]
     label_columns = {
         'user': _('User'),
@@ -91,6 +92,9 @@ class SavedQueryView(SupersetModelView, DeleteMixin):
     list_columns = [
         'label', 'user', 'database', 'schema', 'description',
         'modified', 'pop_tab_link']
+    order_columns = [
+        'label', 'schema', 'description',
+        'modified']
     show_columns = [
         'id', 'label', 'user', 'database',
         'description', 'sql', 'pop_tab_link']
@@ -122,11 +126,12 @@ class SavedQueryView(SupersetModelView, DeleteMixin):
     def show(self, pk):
         pk = self._deserialize_pk_if_composite(pk)
         widgets = self._show(pk)
-        extra_json = self.datamodel.get(pk).extra_json
+        query = self.datamodel.get(pk).to_json()
+        query['extra_json'] = json.loads(query['extra_json'])
         payload = {
             'common': {
                 'feature_flags': get_feature_flags(),
-                'extra_json': json.loads(extra_json),
+                'query': query,
             },
         }
 

@@ -361,8 +361,9 @@ DEFAULT_SQLLAB_LIMIT = 1000
 # Maximum number of tables/views displayed in the dropdown window in SQL Lab.
 MAX_TABLE_NAMES = 3000
 
-# Adds a warning message on sqllab save query modal.
+# Adds a warning message on sqllab save query and schedule query modals.
 SQLLAB_SAVE_WARNING_MESSAGE = None
+SQLLAB_SCHEDULE_WARNING_MESSAGE = None
 
 # If defined, shows this text in an alert-warning box in the navbar
 # one example use case may be "STAGING" to make it clear that this is
@@ -602,8 +603,13 @@ BUG_REPORT_URL = None
 DOCUMENTATION_URL = None
 
 # What is the Last N days relative in the time selector to:
-# 'today' means it is midnight (00:00:00) of today in the local timezone
+# 'today' means it is midnight (00:00:00) in the local timezone
 # 'now' means it is relative to the query issue time
+# If both start and end time is set to now, this will make the time
+# filter a moving window. By only setting the end time to now,
+# start time will be set to midnight, while end will be relative to
+# the query issue time.
+DEFAULT_RELATIVE_START_TIME = 'today'
 DEFAULT_RELATIVE_END_TIME = 'today'
 
 # Is epoch_s/epoch_ms datetime format supposed to be considered since UTC ?
@@ -617,7 +623,7 @@ SQL_VALIDATORS_BY_ENGINE = {
 }
 
 # Do you want Talisman enabled?
-TALISMAN_ENABLED = True
+TALISMAN_ENABLED = False
 # If you want Talisman, how do you want it configured??
 TALISMAN_CONFIG = {
     'content_security_policy': None,
