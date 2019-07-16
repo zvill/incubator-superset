@@ -29,12 +29,21 @@ const propTypes = {
   payload: PropTypes.object.isRequired,
   setControlValue: PropTypes.func.isRequired,
   viewport: PropTypes.object.isRequired,
+  onAddFilter: PropTypes.func,
+  setTooltip: PropTypes.func,
+  onSelect: PropTypes.func,
+};
+const defaultProps = {
+  onAddFilter() {},
+  setTooltip() {},
+  onSelect() {},
 };
 
 class DeckMulti extends React.PureComponent {
   constructor(props) {
     super(props);
     this.state = { subSlicesLayers: {} };
+    this.onViewportChange = this.onViewportChange.bind(this);
   }
 
   componentDidMount() {
@@ -47,8 +56,12 @@ class DeckMulti extends React.PureComponent {
     this.loadLayers(formData, payload);
   }
 
-  loadLayers(formData, payload) {
-    this.setState({ subSlicesLayers: {} });
+  onViewportChange(viewport) {
+    this.setState({ viewport });
+  }
+
+  loadLayers(formData, payload, viewport) {
+    this.setState({ subSlicesLayers: {}, viewport });
     payload.data.slices.forEach((subslice) => {
       // Filters applied to multi_deck are passed down to underlying charts
       // note that dashboard contextual information (filter_immune_slices and such) aren't
@@ -73,6 +86,10 @@ class DeckMulti extends React.PureComponent {
           const layer = layerGenerators[subsliceCopy.form_data.viz_type](
             subsliceCopy.form_data,
             json,
+            this.props.onAddFilter,
+            this.props.setTooltip,
+            [],
+            this.props.onSelect,
           );
           this.setState({
             subSlicesLayers: {
@@ -86,7 +103,7 @@ class DeckMulti extends React.PureComponent {
   }
 
   render() {
-    const { payload, viewport, formData, setControlValue } = this.props;
+    const { payload, formData, setControlValue } = this.props;
     const { subSlicesLayers } = this.state;
 
     const layers = Object.values(subSlicesLayers);
@@ -94,7 +111,8 @@ class DeckMulti extends React.PureComponent {
     return (
       <DeckGLContainer
         mapboxApiAccessToken={payload.data.mapboxApiKey}
-        viewport={viewport}
+        viewport={this.state.viewport || this.props.viewport}
+        onViewportChange={this.onViewportChange}
         layers={layers}
         mapStyle={formData.mapbox_style}
         setControlValue={setControlValue}
@@ -104,5 +122,6 @@ class DeckMulti extends React.PureComponent {
 }
 
 DeckMulti.propTypes = propTypes;
+DeckMulti.defaultProps = defaultProps;
 
 export default DeckMulti;

@@ -32,6 +32,7 @@ import signal
 import smtplib
 import sys
 from time import struct_time
+import traceback
 from typing import List, NamedTuple, Optional, Tuple
 from urllib.parse import unquote_plus
 import uuid
@@ -41,7 +42,7 @@ import bleach
 import celery
 from dateutil.parser import parse
 from dateutil.relativedelta import relativedelta
-from flask import flash, Flask, g, Markup, render_template
+from flask import current_app, flash, Flask, g, Markup, render_template
 from flask_appbuilder.security.sqla.models import User
 from flask_babel import gettext as __
 from flask_babel import lazy_gettext as _
@@ -774,8 +775,14 @@ def choicify(values):
 
 def setup_cache(app: Flask, cache_config) -> Optional[Cache]:
     """Setup the flask-cache on a flask app"""
-    if cache_config and cache_config.get("CACHE_TYPE") != "null":
-        return Cache(app, config=cache_config)
+    if cache_config:
+        if isinstance(cache_config, dict):
+            if cache_config.get("CACHE_TYPE") != "null":
+                return Cache(app, config=cache_config)
+        else:
+            # Accepts a custom cache initialization function,
+            # returning an object compatible with Flask-Caching API
+            return cache_config(app)
 
     return None
 
@@ -1185,3 +1192,8 @@ def shortid() -> str:
 class DatasourceName(NamedTuple):
     table: str
     schema: str
+
+
+def get_stacktrace():
+    if current_app.config.get("SHOW_STACKTRACE"):
+        return traceback.format_exc()

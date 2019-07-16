@@ -181,6 +181,7 @@ def load_deck_dash():
         "point_radius_fixed": {"type": "metric", "value": "count"},
         "point_unit": "square_m",
         "min_radius": 1,
+        "max_radius": 250,
         "row_limit": 5000,
         "time_range": " : ",
         "size": "count",
@@ -360,6 +361,8 @@ def load_deck_dash():
         "stroked": False,
         "extruded": True,
         "point_radius_scale": 100,
+        "point_radius_fixed": {"type": "metric", "value": "count"},
+        "multiplier": 1,
         "js_columns": ["population", "area"],
         "js_data_mutator": "data => data.map(d => ({\n"
         "    ...d,\n"
