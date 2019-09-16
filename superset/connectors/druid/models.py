@@ -31,20 +31,24 @@ from flask_appbuilder import Model
 from flask_appbuilder.models.decorators import renders
 from flask_babel import lazy_gettext as _
 import pandas
-from pydruid.client import PyDruid
-from pydruid.utils.aggregators import count
-from pydruid.utils.dimensions import MapLookupExtraction, RegexExtraction
-from pydruid.utils.filters import Dimension, Filter
-from pydruid.utils.having import Aggregation
-from pydruid.utils.postaggregator import (
-    Const,
-    Field,
-    HyperUniqueCardinality,
-    Postaggregator,
-    Quantile,
-    Quantiles,
-)
-import requests
+
+try:
+    from pydruid.client import PyDruid
+    from pydruid.utils.aggregators import count
+    from pydruid.utils.dimensions import MapLookupExtraction, RegexExtraction
+    from pydruid.utils.filters import Dimension, Filter
+    from pydruid.utils.having import Aggregation
+    from pydruid.utils.postaggregator import (
+        Const,
+        Field,
+        HyperUniqueCardinality,
+        Postaggregator,
+        Quantile,
+        Quantiles,
+    )
+    import requests
+except ImportError:
+    pass
 import sqlalchemy as sa
 from sqlalchemy import (
     Boolean,
@@ -62,39 +66,47 @@ from sqlalchemy_utils import EncryptedType
 
 from superset import conf, db, security_manager
 from superset.connectors.base.models import BaseColumn, BaseDatasource, BaseMetric
-from superset.exceptions import MetricPermException, SupersetException
+from superset.exceptions import SupersetException
 from superset.models.helpers import AuditMixinNullable, ImportMixin, QueryResult
 from superset.utils import core as utils, import_datasource
-from superset.utils.core import DimSelector, DTTM_ALIAS, flasher
 
+try:
+    from superset.utils.core import DimSelector, DTTM_ALIAS, flasher
+except ImportError:
+    pass
 DRUID_TZ = conf.get("DRUID_TZ")
 POST_AGG_TYPE = "postagg"
 metadata = Model.metadata  # pylint: disable=no-member
+
+
+try:
+    # Postaggregator might not have been imported.
+    class JavascriptPostAggregator(Postaggregator):
+        def __init__(self, name, field_names, function):
+            self.post_aggregator = {
+                "type": "javascript",
+                "fieldNames": field_names,
+                "name": name,
+                "function": function,
+            }
+            self.name = name
+
+    class CustomPostAggregator(Postaggregator):
+        """A way to allow users to specify completely custom PostAggregators"""
+
+        def __init__(self, name, post_aggregator):
+            self.name = name
+            self.post_aggregator = post_aggregator
+
+
+except NameError:
+    pass
 
 
 # Function wrapper because bound methods cannot
 # be passed to processes
 def _fetch_metadata_for(datasource):
     return datasource.latest_metadata()
-
-
-class JavascriptPostAggregator(Postaggregator):
-    def __init__(self, name, field_names, function):
-        self.post_aggregator = {
-            "type": "javascript",
-            "fieldNames": field_names,
-            "name": name,
-            "function": function,
-        }
-        self.name = name
-
-
-class CustomPostAggregator(Postaggregator):
-    """A way to allow users to specify completely custom PostAggregators"""
-
-    def __init__(self, name, post_aggregator):
-        self.name = name
-        self.post_aggregator = post_aggregator
 
 
 class DruidCluster(Model, AuditMixinNullable, ImportMixin):
@@ -377,7 +389,6 @@ class DruidMetric(Model, BaseMetric):
         "datasource_id",
         "json",
         "description",
-        "is_restricted",
         "d3format",
         "warning_text",
     )
@@ -732,6 +743,16 @@ class DruidDatasource(Model, BaseDatasource):
             return 6 * 24 * 3600 * 1000  # 6 days
         return 0
 
+    @classmethod
+    def get_datasource_by_name(cls, session, datasource_name, schema, database_name):
+        query = (
+            session.query(cls)
+            .join(DruidCluster)
+            .filter(cls.datasource_name == datasource_name)
+            .filter(DruidCluster.cluster_name == database_name)
+        )
+        return query.first()
+
     # uses https://en.wikipedia.org/wiki/ISO_8601
     # http://druid.io/docs/0.8.0/querying/granularities.html
     # TODO: pass origin from the UI
@@ -1022,19 +1043,6 @@ class DruidDatasource(Model, BaseDatasource):
             }
         return aggregations
 
-    def check_restricted_metrics(self, aggregations):
-        rejected_metrics = [
-            m.metric_name
-            for m in self.metrics
-            if m.is_restricted
-            and m.metric_name in aggregations.keys()
-            and not security_manager.has_access("metric_access", m.perm)
-        ]
-        if rejected_metrics:
-            raise MetricPermException(
-                "Access to the metrics denied: " + ", ".join(rejected_metrics)
-            )
-
     def get_dimensions(self, groupby, columns_dict):
         dimensions = []
         groupby = [gb for gb in groupby if gb in columns_dict]
@@ -1110,8 +1118,6 @@ class DruidDatasource(Model, BaseDatasource):
         phase=2,
         client=None,
         order_desc=True,
-        prequeries=None,
-        is_prequery=False,
     ):
         """Runs a query against Druid and returns a dataframe.
         """
@@ -1143,8 +1149,6 @@ class DruidDatasource(Model, BaseDatasource):
         aggregations, post_aggs = DruidDatasource.metrics_and_post_aggs(
             metrics, metrics_dict
         )
-
-        self.check_restricted_metrics(aggregations)
 
         # the dimensions list with dimensionSpecs expanded
         dimensions = self.get_dimensions(groupby, columns_dict)

@@ -24,12 +24,9 @@ from sqlalchemy.engine.result import RowProxy
 from sqlalchemy.sql import select
 from sqlalchemy.types import String, UnicodeText
 
+from superset import app
 from superset.db_engine_specs import engines
-from superset.db_engine_specs.base import (
-    BaseEngineSpec,
-    builtin_time_grains,
-    create_time_grains_tuple,
-)
+from superset.db_engine_specs.base import BaseEngineSpec, builtin_time_grains
 from superset.db_engine_specs.bigquery import BigQueryEngineSpec
 from superset.db_engine_specs.hive import HiveEngineSpec
 from superset.db_engine_specs.mssql import MssqlEngineSpec
@@ -38,7 +35,9 @@ from superset.db_engine_specs.oracle import OracleEngineSpec
 from superset.db_engine_specs.pinot import PinotEngineSpec
 from superset.db_engine_specs.postgres import PostgresEngineSpec
 from superset.db_engine_specs.presto import PrestoEngineSpec
+from superset.db_engine_specs.sqlite import SqliteEngineSpec
 from superset.models.core import Database
+from superset.utils.core import get_example_database
 from .base_tests import SupersetTestCase
 
 
@@ -138,7 +137,7 @@ class DbEngineSpecsTestCase(SupersetTestCase):
         )
         self.assertEquals(
             (
-                "Error while compiling statement: FAILED: "
+                "hive error: Error while compiling statement: FAILED: "
                 "SemanticException [Error 10001]: Line 4:5 "
                 "Table not found 'fact_ridesfdslakj'"
             ),
@@ -146,7 +145,7 @@ class DbEngineSpecsTestCase(SupersetTestCase):
         )
 
         e = Exception("Some string that doesn't match the regex")
-        self.assertEquals(str(e), HiveEngineSpec.extract_error_message(e))
+        self.assertEquals(f"hive error: {e}", HiveEngineSpec.extract_error_message(e))
 
         msg = (
             "errorCode=10001, "
@@ -154,7 +153,7 @@ class DbEngineSpecsTestCase(SupersetTestCase):
             '=None)"'
         )
         self.assertEquals(
-            ("Error while compiling statement"),
+            ("hive error: Error while compiling statement"),
             HiveEngineSpec.extract_error_message(Exception(msg)),
         )
 
@@ -174,12 +173,12 @@ class DbEngineSpecsTestCase(SupersetTestCase):
         q2 = "select * from (select * from my_subquery limit 10) where col=1 limit 20"
         q3 = "select * from (select * from my_subquery limit 10);"
         q4 = "select * from (select * from my_subquery limit 10) where col=1 limit 20;"
-        q5 = "select * from mytable limit 10, 20"
+        q5 = "select * from mytable limit 20, 10"
         q6 = "select * from mytable limit 10 offset 20"
         q7 = "select * from mytable limit"
         q8 = "select * from mytable limit 10.0"
         q9 = "select * from mytable limit x"
-        q10 = "select * from mytable limit x, 20"
+        q10 = "select * from mytable limit 20, x"
         q11 = "select * from mytable limit x offset 20"
 
         self.assertEqual(engine_spec_class.get_limit_from_sql(q0), None)
@@ -314,14 +313,21 @@ class DbEngineSpecsTestCase(SupersetTestCase):
         )
 
     def test_time_grain_blacklist(self):
-        blacklist = ["PT1M"]
-        time_grains = {"PT1S": "second", "PT1M": "minute"}
-        time_grain_functions = {"PT1S": "{col}", "PT1M": "{col}"}
-        time_grains = create_time_grains_tuple(
-            time_grains, time_grain_functions, blacklist
-        )
-        self.assertEqual(1, len(time_grains))
-        self.assertEqual("PT1S", time_grains[0].duration)
+        with app.app_context():
+            app.config["TIME_GRAIN_BLACKLIST"] = ["PT1M"]
+            time_grain_functions = SqliteEngineSpec.get_time_grain_functions()
+            self.assertNotIn("PT1M", time_grain_functions)
+
+    def test_time_grain_addons(self):
+        with app.app_context():
+            app.config["TIME_GRAIN_ADDONS"] = {"PTXM": "x seconds"}
+            app.config["TIME_GRAIN_ADDON_FUNCTIONS"] = {
+                "sqlite": {"PTXM": "ABC({col})"}
+            }
+            time_grains = SqliteEngineSpec.get_time_grains()
+            time_grain_addon = time_grains[-1]
+            self.assertEqual("PTXM", time_grain_addon.duration)
+            self.assertEqual("x seconds", time_grain_addon.label)
 
     def test_engine_time_grain_validity(self):
         time_grains = set(builtin_time_grains.keys())
@@ -329,8 +335,8 @@ class DbEngineSpecsTestCase(SupersetTestCase):
         for engine in engines.values():
             if engine is not BaseEngineSpec:
                 # make sure time grain functions have been defined
-                self.assertGreater(len(engine.time_grain_functions), 0)
-                # make sure that all defined time grains are supported
+                self.assertGreater(len(engine.get_time_grain_functions()), 0)
+                # make sure all defined time grains are supported
                 defined_grains = {grain.duration for grain in engine.get_time_grains()}
                 intersection = time_grains.intersection(defined_grains)
                 self.assertSetEqual(defined_grains, intersection, engine)
@@ -359,16 +365,25 @@ class DbEngineSpecsTestCase(SupersetTestCase):
         expected_results = [("column_name", "BOOLEAN")]
         self.verify_presto_column(presto_column, expected_results)
 
+    @mock.patch.dict(
+        "superset._feature_flags", {"PRESTO_EXPAND_DATA": True}, clear=True
+    )
     def test_presto_get_simple_row_column(self):
         presto_column = ("column_name", "row(nested_obj double)", "")
         expected_results = [("column_name", "ROW"), ("column_name.nested_obj", "FLOAT")]
         self.verify_presto_column(presto_column, expected_results)
 
+    @mock.patch.dict(
+        "superset._feature_flags", {"PRESTO_EXPAND_DATA": True}, clear=True
+    )
     def test_presto_get_simple_row_column_with_name_containing_whitespace(self):
         presto_column = ("column name", "row(nested_obj double)", "")
         expected_results = [("column name", "ROW"), ("column name.nested_obj", "FLOAT")]
         self.verify_presto_column(presto_column, expected_results)
 
+    @mock.patch.dict(
+        "superset._feature_flags", {"PRESTO_EXPAND_DATA": True}, clear=True
+    )
     def test_presto_get_simple_row_column_with_tricky_nested_field_name(self):
         presto_column = ("column_name", 'row("Field Name(Tricky, Name)" double)', "")
         expected_results = [
@@ -377,11 +392,17 @@ class DbEngineSpecsTestCase(SupersetTestCase):
         ]
         self.verify_presto_column(presto_column, expected_results)
 
+    @mock.patch.dict(
+        "superset._feature_flags", {"PRESTO_EXPAND_DATA": True}, clear=True
+    )
     def test_presto_get_simple_array_column(self):
         presto_column = ("column_name", "array(double)", "")
         expected_results = [("column_name", "ARRAY")]
         self.verify_presto_column(presto_column, expected_results)
 
+    @mock.patch.dict(
+        "superset._feature_flags", {"PRESTO_EXPAND_DATA": True}, clear=True
+    )
     def test_presto_get_row_within_array_within_row_column(self):
         presto_column = (
             "column_name",
@@ -396,6 +417,9 @@ class DbEngineSpecsTestCase(SupersetTestCase):
         ]
         self.verify_presto_column(presto_column, expected_results)
 
+    @mock.patch.dict(
+        "superset._feature_flags", {"PRESTO_EXPAND_DATA": True}, clear=True
+    )
     def test_presto_get_array_within_row_within_array_column(self):
         presto_column = (
             "column_name",
@@ -613,6 +637,9 @@ class DbEngineSpecsTestCase(SupersetTestCase):
         }
         self.assertEqual(array_col_hierarchy, expected_array_col_hierarchy)
 
+    @mock.patch.dict(
+        "superset._feature_flags", {"PRESTO_EXPAND_DATA": True}, clear=True
+    )
     def test_presto_expand_data_with_simple_structural_columns(self):
         cols = [
             {"name": "row_column", "type": "ROW(NESTED_OBJ VARCHAR)"},
@@ -643,6 +670,9 @@ class DbEngineSpecsTestCase(SupersetTestCase):
         self.assertEqual(actual_data, expected_data)
         self.assertEqual(actual_expanded_cols, expected_expanded_cols)
 
+    @mock.patch.dict(
+        "superset._feature_flags", {"PRESTO_EXPAND_DATA": True}, clear=True
+    )
     def test_presto_expand_data_with_complex_row_columns(self):
         cols = [
             {
@@ -683,6 +713,9 @@ class DbEngineSpecsTestCase(SupersetTestCase):
         self.assertEqual(actual_data, expected_data)
         self.assertEqual(actual_expanded_cols, expected_expanded_cols)
 
+    @mock.patch.dict(
+        "superset._feature_flags", {"PRESTO_EXPAND_DATA": True}, clear=True
+    )
     def test_presto_expand_data_with_complex_array_columns(self):
         cols = [
             {"name": "int_column", "type": "BIGINT"},
@@ -765,6 +798,7 @@ class DbEngineSpecsTestCase(SupersetTestCase):
     def test_presto_extra_table_metadata(self):
         db = mock.Mock()
         db.get_indexes = mock.Mock(return_value=[{"column_names": ["ds", "hour"]}])
+        db.get_extra = mock.Mock(return_value={})
         df = pd.DataFrame({"ds": ["01-01-19"], "hour": [1]})
         db.get_df = mock.Mock(return_value=df)
         result = PrestoEngineSpec.extra_table_metadata(db, "test_table", "test_schema")
@@ -773,6 +807,7 @@ class DbEngineSpecsTestCase(SupersetTestCase):
     def test_presto_where_latest_partition(self):
         db = mock.Mock()
         db.get_indexes = mock.Mock(return_value=[{"column_names": ["ds", "hour"]}])
+        db.get_extra = mock.Mock(return_value={})
         df = pd.DataFrame({"ds": ["01-01-19"], "hour": [1]})
         db.get_df = mock.Mock(return_value=df)
         columns = [{"name": "ds"}, {"name": "hour"}]
@@ -925,14 +960,14 @@ class DbEngineSpecsTestCase(SupersetTestCase):
         )  # noqa
 
     def test_column_datatype_to_string(self):
-        main_db = self.get_main_database()
-        sqla_table = main_db.get_table("energy_usage")
-        dialect = main_db.get_dialect()
+        example_db = get_example_database()
+        sqla_table = example_db.get_table("energy_usage")
+        dialect = example_db.get_dialect()
         col_names = [
-            main_db.db_engine_spec.column_datatype_to_string(c.type, dialect)
+            example_db.db_engine_spec.column_datatype_to_string(c.type, dialect)
             for c in sqla_table.columns
         ]
-        if main_db.backend == "postgresql":
+        if example_db.backend == "postgresql":
             expected = ["VARCHAR(255)", "VARCHAR(255)", "DOUBLE PRECISION"]
         else:
             expected = ["VARCHAR(255)", "VARCHAR(255)", "FLOAT"]
