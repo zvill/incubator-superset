@@ -454,6 +454,11 @@ SQLLAB_DEFAULT_DBID = None
 # by celery.
 SQLLAB_ASYNC_TIME_LIMIT_SEC = 60 * 60 * 6
 
+# Some databases support running EXPLAIN queries that allow users to estimate
+# query costs before they run. These EXPLAIN queries should have a small
+# timeout.
+SQLLAB_QUERY_COST_ESTIMATE_TIMEOUT = 10  # seconds
+
 # An instantiated derivative of werkzeug.contrib.cache.BaseCache
 # if enabled, it can be used to store the results of long-running queries
 # in SQL Lab by using the "Run Async" button/feature
@@ -649,6 +654,16 @@ TALISMAN_CONFIG = {
     "force_https": True,
     "force_https_permanent": False,
 }
+
+#
+# Flask session cookie options
+#
+# See https://flask.palletsprojects.com/en/1.1.x/security/#set-cookie-options
+# for details
+#
+SESSION_COOKIE_HTTPONLY = True  # Prevent cookie from being read by frontend JS?
+SESSION_COOKIE_SECURE = False  # Prevent cookie from being transmitted over non-tls?
+SESSION_COOKIE_SAMESITE = "Lax"  # One of [None, 'Lax', 'Strict']
 
 # URI to database storing the example data, points to
 # SQLALCHEMY_DATABASE_URI by default if set to `None`

@@ -24,7 +24,7 @@ Getting Started
 Superset has deprecated support for Python ``2.*`` and supports
 only ``~=3.6`` to take advantage of the newer Python features and reduce
 the burden of supporting previous versions. We run our test suite
-against ``3.6``, but running on ``3.7`` **should** work as well.
+against ``3.6``, but ``3.7`` is fully supported as well.
 
 Cloud-native!
 -------------
@@ -176,7 +176,7 @@ Superset installation and initialization
 Follow these few simple steps to install Superset.::
 
     # Install superset
-    pip install superset
+    pip install apache-superset
 
     # Initialize the database
     superset db upgrade
@@ -376,6 +376,8 @@ Here's a list of some of the recommended packages.
 | BigQuery         | ``pip install pybigquery``            | ``bigquery://``                                 |
 +------------------+---------------------------------------+-------------------------------------------------+
 | ClickHouse       | ``pip install sqlalchemy-clickhouse`` |                                                 |
++------------------+---------------------------------------+-------------------------------------------------+
+| Exasol           | ``pip install sqlalchemy-exasol``     | ``exa+pyodbc://``                               |
 +------------------+---------------------------------------+-------------------------------------------------+
 | Google Sheets    | ``pip install gsheetsdb``             | ``gsheets://``                                  |
 +------------------+---------------------------------------+-------------------------------------------------+
@@ -659,6 +661,25 @@ it in the ``extra`` parameter::
     }
 
 
+Exasol
+---------
+
+The connection string for Exasol looks like this ::
+
+    exa+pyodbc://{user}:{password}@{host}
+
+*Note*: It's required to have Exasol ODBC drivers installed for the sqlalchemy dialect to work properly. Exasol ODBC Drivers available are here: https://www.exasol.com/portal/display/DOWNLOAD/Exasol+Download+Section
+
+Example config (odbcinst.ini can be left empty) ::
+
+    $ cat $/.../path/to/odbc.ini
+    [EXAODBC]
+    DRIVER = /.../path/to/driver/EXASOL_driver.so
+    EXAHOST = host:8563
+    EXASCHEMA = main
+
+See `SQLAlchemy for Exasol <https://github.com/blue-yonder/sqlalchemy_exasol>`_.
+
 CORS
 ----
 
@@ -748,7 +769,7 @@ Upgrading
 
 Upgrading should be as straightforward as running::
 
-    pip install superset --upgrade
+    pip install apache-superset --upgrade
     superset db upgrade
     superset init
 
