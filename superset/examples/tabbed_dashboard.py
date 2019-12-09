@@ -15,15 +15,15 @@
 # specific language governing permissions and limitations
 # under the License.
 """Loads datasets, dashboards and slices in a new superset instance"""
-# pylint: disable=C,R,W
 import json
 import textwrap
 
 from superset import db
+
 from .helpers import Dash, Slice, update_slice_ids
 
 
-def load_tabbed_dashboard(only_metadata=False):
+def load_tabbed_dashboard(_=False):
     """Creating a tabbed dashboard"""
 
     print("Creating a dashboard with nested tabs")

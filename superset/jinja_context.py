@@ -16,30 +16,14 @@
 # under the License.
 # pylint: disable=C,R,W
 """Defines the templating context for SQL Lab"""
-from datetime import datetime, timedelta
 import inspect
 import json
-import random
-import time
 from typing import Any, List, Optional, Tuple
-import uuid
 
-from dateutil.relativedelta import relativedelta
 from flask import g, request
 from jinja2.sandbox import SandboxedEnvironment
 
-from superset import app
-
-config = app.config
-BASE_CONTEXT = {
-    "datetime": datetime,
-    "random": random,
-    "relativedelta": relativedelta,
-    "time": time,
-    "timedelta": timedelta,
-    "uuid": uuid,
-}
-BASE_CONTEXT.update(config.get("JINJA_CONTEXT_ADDONS", {}))
+from superset import jinja_base_context
 
 
 def url_param(param: str, default: Optional[str] = None) -> Optional[Any]:
@@ -55,6 +39,9 @@ def url_param(param: str, default: Optional[str] = None) -> Optional[Any]:
     As you create a visualization form this SQL Lab query, you can pass
     parameters in the explore view as well as from the dashboard, and
     it should carry through to your queries.
+
+    Default values for URL parameters can be defined in chart metdata by
+    adding the key-value pair `url_params: {'foo': 'bar'}`
 
     :param param: the parameter to lookup
     :param default: the value to return in the absence of the parameter
@@ -206,7 +193,7 @@ class BaseTemplateProcessor:
             "form_data": {},
         }
         self.context.update(kwargs)
-        self.context.update(BASE_CONTEXT)
+        self.context.update(jinja_base_context)
         if self.engine:
             self.context[self.engine] = self
         self.env = SandboxedEnvironment()
