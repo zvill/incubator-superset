@@ -104,7 +104,7 @@ def compile_timegrain_expression(
     return element.name.replace("{col}", compiler.process(element.col, **kw))
 
 
-class LimitMethod(object):  # pylint: disable=too-few-public-methods
+class LimitMethod:  # pylint: disable=too-few-public-methods
     """Enum the ways that limits can be applied"""
 
     FETCH_MANY = "fetch_many"
@@ -287,12 +287,6 @@ class BaseEngineSpec:  # pylint: disable=too-many-public-methods
         """
         if isinstance(type_code, str) and type_code != "":
             return type_code.upper()
-        return None
-
-    @classmethod
-    def get_pandas_dtype(
-        cls, cursor_description: List[tuple]
-    ) -> Optional[Dict[str, str]]:
         return None
 
     @classmethod
@@ -856,3 +850,15 @@ class BaseEngineSpec:  # pylint: disable=too-many-public-methods
         :return: Compiled column type
         """
         return sqla_column_type.compile(dialect=dialect).upper()
+
+    @staticmethod
+    def pyodbc_rows_to_tuples(data: List[Any]) -> List[Tuple]:
+        """
+        Convert pyodbc.Row objects from `fetch_data` to tuples.
+
+        :param data: List of tuples or pyodbc.Row objects
+        :return: List of tuples
+        """
+        if data and type(data[0]).__name__ == "Row":
+            data = [tuple(row) for row in data]
+        return data
