@@ -81,7 +81,7 @@ class SupersetAppInitializer:
 
     def pre_init(self) -> None:
         """
-        Called after all other init tasks are complete
+        Called before all other init tasks are complete
         """
         wtforms_json.init()
 
@@ -90,7 +90,7 @@ class SupersetAppInitializer:
 
     def post_init(self) -> None:
         """
-        Called before any other init tasks
+        Called after any other init tasks
         """
         pass
 
@@ -221,7 +221,7 @@ class SupersetAppInitializer:
 
         if self.config["ENABLE_CHUNK_ENCODING"]:
 
-            class ChunkedEncodingFix(object):  # pylint: disable=too-few-public-methods
+            class ChunkedEncodingFix:  # pylint: disable=too-few-public-methods
                 def __init__(self, app):
                     self.app = app
 
