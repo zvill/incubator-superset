@@ -22,7 +22,7 @@ from flask_appbuilder import expose
 from flask_appbuilder.security.decorators import has_access_api
 from sqlalchemy.orm.exc import NoResultFound
 
-from superset import appbuilder, db
+from superset import db
 from superset.connectors.connector_registry import ConnectorRegistry
 from superset.models.core import Database
 
@@ -41,24 +41,26 @@ class Datasource(BaseSupersetView):
         if not isinstance(data, str):
             return json_error_response("Request missing data field.", status="500")
 
-        datasource = json.loads(data)
-        datasource_id = datasource.get("id")
-        datasource_type = datasource.get("type")
+        datasource_dict = json.loads(data)
+        datasource_id = datasource_dict.get("id")
+        datasource_type = datasource_dict.get("type")
+        database_id = datasource_dict["database"].get("id")
         orm_datasource = ConnectorRegistry.get_datasource(
             datasource_type, datasource_id, db.session
         )
+        orm_datasource.database_id = database_id
 
-        if "owners" in datasource and orm_datasource.owner_class is not None:
-            datasource["owners"] = (
+        if "owners" in datasource_dict and orm_datasource.owner_class is not None:
+            datasource_dict["owners"] = (
                 db.session.query(orm_datasource.owner_class)
-                .filter(orm_datasource.owner_class.id.in_(datasource["owners"]))
+                .filter(orm_datasource.owner_class.id.in_(datasource_dict["owners"]))
                 .all()
             )
 
         duplicates = [
             name
             for name, count in Counter(
-                [col["column_name"] for col in datasource["columns"]]
+                [col["column_name"] for col in datasource_dict["columns"]]
             ).items()
             if count > 1
         ]
@@ -66,8 +68,7 @@ class Datasource(BaseSupersetView):
             return json_error_response(
                 f"Duplicate column name(s): {','.join(duplicates)}", status="409"
             )
-
-        orm_datasource.update_from_object(datasource)
+        orm_datasource.update_from_object(datasource_dict)
         data = orm_datasource.data
         db.session.commit()
 
@@ -114,6 +115,3 @@ class Datasource(BaseSupersetView):
             raise Exception(f"Unsupported datasource_type: {datasource_type}")
         external_metadata = datasource.external_metadata()
         return self.json_response(external_metadata)
-
-
-appbuilder.add_view_no_menu(Datasource)

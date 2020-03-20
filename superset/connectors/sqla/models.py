@@ -57,11 +57,12 @@ from superset.exceptions import DatabaseNotFound
 from superset.jinja_context import get_template_processor
 from superset.models.annotations import Annotation
 from superset.models.core import Database
-from superset.models.helpers import QueryResult
+from superset.models.helpers import AuditMixinNullable, QueryResult
 from superset.utils import core as utils, import_datasource
 
 config = app.config
 metadata = Model.metadata  # pylint: disable=no-member
+logger = logging.getLogger(__name__)
 
 
 class SqlaQuery(NamedTuple):
@@ -85,7 +86,6 @@ class AnnotationDatasource(BaseDatasource):
     cache_timeout = 0
 
     def query(self, query_obj: Dict[str, Any]) -> QueryResult:
-        df = None
         error_message = None
         qry = db.session.query(Annotation)
         qry = qry.filter(Annotation.layer_id == query_obj["filter"][0]["val"])
@@ -97,8 +97,9 @@ class AnnotationDatasource(BaseDatasource):
         try:
             df = pd.read_sql_query(qry.statement, db.engine)
         except Exception as e:
+            df = pd.DataFrame()
             status = utils.QueryStatus.FAILED
-            logging.exception(e)
+            logger.exception(e)
             error_message = utils.error_msg_from_exception(e)
         return QueryResult(
             status=status, df=df, duration=0, query="", error_message=error_message
@@ -144,14 +145,35 @@ class TableColumn(Model, BaseColumn):
     update_from_object_fields = [s for s in export_fields if s not in ("table_id",)]
     export_parent = "table"
 
+    @property
+    def is_numeric(self) -> bool:
+        db_engine_spec = self.table.database.db_engine_spec
+        return db_engine_spec.is_db_column_type_match(
+            self.type, utils.DbColumnType.NUMERIC
+        )
+
+    @property
+    def is_string(self) -> bool:
+        db_engine_spec = self.table.database.db_engine_spec
+        return db_engine_spec.is_db_column_type_match(
+            self.type, utils.DbColumnType.STRING
+        )
+
+    @property
+    def is_temporal(self) -> bool:
+        db_engine_spec = self.table.database.db_engine_spec
+        return db_engine_spec.is_db_column_type_match(
+            self.type, utils.DbColumnType.TEMPORAL
+        )
+
     def get_sqla_col(self, label: Optional[str] = None) -> Column:
         label = label or self.column_name
-        if not self.expression:
+        if self.expression:
+            col = literal_column(self.expression)
+        else:
             db_engine_spec = self.table.database.db_engine_spec
             type_ = db_engine_spec.get_sqla_column_type(self.type)
             col = column(self.column_name, type_=type_)
-        else:
-            col = literal_column(self.expression)
         col = self.table.make_sqla_column_compatible(col, label)
         return col
 
@@ -206,7 +228,9 @@ class TableColumn(Model, BaseColumn):
             col = literal_column(self.expression)
         else:
             col = column(self.column_name)
-        time_expr = db.db_engine_spec.get_timestamp_expr(col, pdf, time_grain)
+        time_expr = db.db_engine_spec.get_timestamp_expr(
+            col, pdf, time_grain, self.type
+        )
         return self.table.make_sqla_column_compatible(time_expr, label)
 
     @classmethod
@@ -400,8 +424,8 @@ class SqlaTable(Model, BaseDatasource):
     def make_sqla_column_compatible(
         self, sqla_col: Column, label: Optional[str] = None
     ) -> Column:
-        """Takes a sql alchemy column object and adds label info if supported by engine.
-        :param sqla_col: sql alchemy column instance
+        """Takes a sqlalchemy column object and adds label info if supported by engine.
+        :param sqla_col: sqlalchemy column instance
         :param label: alias/label that column is expected to have
         :return: either a sql alchemy column or label instance if supported by engine
         """
@@ -415,6 +439,18 @@ class SqlaTable(Model, BaseDatasource):
 
     def __repr__(self):
         return self.name
+
+    @property
+    def changed_by_name(self) -> str:
+        if not self.changed_by:
+            return ""
+        return str(self.changed_by)
+
+    @property
+    def changed_by_url(self) -> str:
+        if not self.changed_by:
+            return ""
+        return f"/superset/profile/{self.changed_by.username}"
 
     @property
     def connection(self) -> str:
@@ -488,7 +524,7 @@ class SqlaTable(Model, BaseDatasource):
 
     @property
     def num_cols(self) -> List:
-        return [c.column_name for c in self.columns if c.is_num]
+        return [c.column_name for c in self.columns if c.is_numeric]
 
     @property
     def any_dttm_col(self) -> Optional[str]:
@@ -530,11 +566,7 @@ class SqlaTable(Model, BaseDatasource):
         # show_cols and latest_partition set to false to avoid
         # the expensive cost of inspecting the DB
         return self.database.select_star(
-            self.table_name,
-            sql=self.sql,
-            schema=self.schema,
-            show_cols=False,
-            latest_partition=False,
+            self.table_name, schema=self.schema, show_cols=False, latest_partition=False
         )
 
     @property
@@ -594,7 +626,7 @@ class SqlaTable(Model, BaseDatasource):
     def get_query_str_extended(self, query_obj: Dict[str, Any]) -> QueryStringExtended:
         sqlaq = self.get_sqla_query(**query_obj)
         sql = self.database.compile_sqla_query(sqlaq.sqla_query)
-        logging.info(sql)
+        logger.info(sql)
         sql = sqlparse.format(sql, reindent=True)
         sql = self.mutate_query_from_config(sql)
         return QueryStringExtended(
@@ -648,6 +680,19 @@ class SqlaTable(Model, BaseDatasource):
             return None
 
         return self.make_sqla_column_compatible(sqla_metric, label)
+
+    def _get_sqla_row_level_filters(self, template_processor) -> List[str]:
+        """
+        Return the appropriate row level security filters for this table and the current user.
+
+        :param BaseTemplateProcessor template_processor: The template processor to apply to the filters.
+        :returns: A list of SQL clauses to be ANDed together.
+        :rtype: List[str]
+        """
+        return [
+            text("({})".format(template_processor.process_template(f.clause)))
+            for f in security_manager.get_rls_filters(self)
+        ]
 
     def get_sqla_query(  # sqla
         self,
@@ -706,7 +751,7 @@ class SqlaTable(Model, BaseDatasource):
             )
         if not groupby and not metrics and not columns:
             raise Exception(_("Empty query?"))
-        metrics_exprs = []
+        metrics_exprs: List[ColumnElement] = []
         for m in metrics:
             if utils.is_adhoc_metric(m):
                 metrics_exprs.append(self.adhoc_metric_to_sqla(m, cols))
@@ -724,6 +769,9 @@ class SqlaTable(Model, BaseDatasource):
         groupby_exprs_sans_timestamp: OrderedDict = OrderedDict()
 
         if groupby:
+            # dedup columns while preserving order
+            groupby = list(dict.fromkeys(groupby))
+
             select_exprs = []
             for s in groupby:
                 if s in cols:
@@ -796,7 +844,7 @@ class SqlaTable(Model, BaseDatasource):
                 is_list_target = op in ("in", "not in")
                 eq = self.filter_values_handler(
                     flt.get("val"),
-                    target_column_is_numeric=col_obj.is_num,
+                    target_column_is_numeric=col_obj.is_numeric,
                     is_list_target=is_list_target,
                 )
                 if op in ("in", "not in"):
@@ -807,7 +855,7 @@ class SqlaTable(Model, BaseDatasource):
                         cond = ~cond
                     where_clause_and.append(cond)
                 else:
-                    if col_obj.is_num:
+                    if col_obj.is_numeric:
                         eq = utils.string_to_num(flt["val"])
                     if op == "==":
                         where_clause_and.append(col_obj.get_sqla_col() == eq)
@@ -827,6 +875,8 @@ class SqlaTable(Model, BaseDatasource):
                         where_clause_and.append(col_obj.get_sqla_col() == None)
                     elif op == "IS NOT NULL":
                         where_clause_and.append(col_obj.get_sqla_col() != None)
+
+        where_clause_and += self._get_sqla_row_level_filters(template_processor)
         if extras:
             where = extras.get("where")
             if where:
@@ -845,12 +895,20 @@ class SqlaTable(Model, BaseDatasource):
         if not orderby and not columns:
             orderby = [(main_metric_expr, not order_desc)]
 
+        # To ensure correct handling of the ORDER BY labeling we need to reference the
+        # metric instance if defined in the SELECT clause.
+        metrics_exprs_by_label = {m._label: m for m in metrics_exprs}
+
         for col, ascending in orderby:
             direction = asc if ascending else desc
             if utils.is_adhoc_metric(col):
                 col = self.adhoc_metric_to_sqla(col, cols)
             elif col in cols:
                 col = cols[col].get_sqla_col()
+
+            if isinstance(col, Label) and col._label in metrics_exprs_by_label:
+                col = metrics_exprs_by_label[col._label]
+
             qry = qry.order_by(direction(col))
 
         if row_limit:
@@ -936,7 +994,6 @@ class SqlaTable(Model, BaseDatasource):
                     result.df, dimensions, groupby_exprs_sans_timestamp
                 )
                 qry = qry.where(top_groups)
-
         return SqlaQuery(
             extra_cache_keys=extra_cache_keys,
             labels_expected=labels_expected,
@@ -999,9 +1056,9 @@ class SqlaTable(Model, BaseDatasource):
         try:
             df = self.database.get_df(sql, self.schema, mutator)
         except Exception as e:
-            df = None
+            df = pd.DataFrame()
             status = utils.QueryStatus.FAILED
-            logging.exception(f"Query {sql} on schema {self.schema} failed")
+            logger.exception(f"Query {sql} on schema {self.schema} failed")
             db_engine_spec = self.database.db_engine_spec
             error_message = db_engine_spec.extract_error_message(e)
 
@@ -1021,7 +1078,7 @@ class SqlaTable(Model, BaseDatasource):
         try:
             table = self.get_sqla_table_object()
         except Exception as e:
-            logging.exception(e)
+            logger.exception(e)
             raise Exception(
                 _(
                     "Table [{}] doesn't seem to exist in the specified database, "
@@ -1048,21 +1105,21 @@ class SqlaTable(Model, BaseDatasource):
                 )
             except Exception as e:
                 datatype = "UNKNOWN"
-                logging.error("Unrecognized data type in {}.{}".format(table, col.name))
-                logging.exception(e)
+                logger.error("Unrecognized data type in {}.{}".format(table, col.name))
+                logger.exception(e)
             dbcol = dbcols.get(col.name, None)
             if not dbcol:
-                dbcol = TableColumn(column_name=col.name, type=datatype)
-                dbcol.sum = dbcol.is_num
-                dbcol.avg = dbcol.is_num
-                dbcol.is_dttm = dbcol.is_time
+                dbcol = TableColumn(column_name=col.name, type=datatype, table=self)
+                dbcol.sum = dbcol.is_numeric
+                dbcol.avg = dbcol.is_numeric
+                dbcol.is_dttm = dbcol.is_temporal
                 db_engine_spec.alter_new_orm_column(dbcol)
             else:
                 dbcol.type = datatype
             dbcol.groupby = True
             dbcol.filterable = True
             self.columns.append(dbcol)
-            if not any_date_col and dbcol.is_time:
+            if not any_date_col and dbcol.is_temporal:
                 any_date_col = col.name
 
         metrics.append(
@@ -1180,3 +1237,30 @@ class SqlaTable(Model, BaseDatasource):
 
 sa.event.listen(SqlaTable, "after_insert", security_manager.set_perm)
 sa.event.listen(SqlaTable, "after_update", security_manager.set_perm)
+
+
+RLSFilterRoles = Table(
+    "rls_filter_roles",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("role_id", Integer, ForeignKey("ab_role.id"), nullable=False),
+    Column("rls_filter_id", Integer, ForeignKey("row_level_security_filters.id")),
+)
+
+
+class RowLevelSecurityFilter(Model, AuditMixinNullable):
+    """
+    Custom where clauses attached to Tables and Roles.
+    """
+
+    __tablename__ = "row_level_security_filters"
+    id = Column(Integer, primary_key=True)  # pylint: disable=invalid-name
+    roles = relationship(
+        security_manager.role_model,
+        secondary=RLSFilterRoles,
+        backref="row_level_security_filters",
+    )
+
+    table_id = Column(Integer, ForeignKey("tables.id"), nullable=False)
+    table = relationship(SqlaTable, backref="row_level_security_filters")
+    clause = Column(Text, nullable=False)

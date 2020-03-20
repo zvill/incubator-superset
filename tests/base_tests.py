@@ -40,6 +40,13 @@ FAKE_DB_NAME = "fake_db_100"
 
 
 class SupersetTestCase(TestCase):
+
+    default_schema_backend_map = {
+        "sqlite": "main",
+        "mysql": "superset",
+        "postgresql": "public",
+    }
+
     def __init__(self, *args, **kwargs):
         super(SupersetTestCase, self).__init__(*args, **kwargs)
         self.maxDiff = None
@@ -61,9 +68,19 @@ class SupersetTestCase(TestCase):
             username, first_name, last_name, email, role_admin, password
         )
 
+    @staticmethod
+    def get_user(username: str) -> ab_models.User:
+        user = (
+            db.session.query(security_manager.user_model)
+            .filter_by(username=username)
+            .one_or_none()
+        )
+        return user
+
     @classmethod
     def create_druid_test_objects(cls):
         # create druid cluster and druid datasources
+
         with app.app_context():
             session = db.session
             cluster = (
@@ -75,11 +92,11 @@ class SupersetTestCase(TestCase):
                 session.commit()
 
                 druid_datasource1 = DruidDatasource(
-                    datasource_name="druid_ds_1", cluster_name="druid_test"
+                    datasource_name="druid_ds_1", cluster=cluster
                 )
                 session.add(druid_datasource1)
                 druid_datasource2 = DruidDatasource(
-                    datasource_name="druid_ds_2", cluster_name="druid_test"
+                    datasource_name="druid_ds_2", cluster=cluster
                 )
                 session.add(druid_datasource2)
                 session.commit()
@@ -212,22 +229,27 @@ class SupersetTestCase(TestCase):
         query_limit=None,
         database_name="examples",
         sql_editor_id=None,
+        select_as_cta=False,
+        tmp_table_name=None,
     ):
         if user_name:
             self.logout()
             self.login(username=(user_name or "admin"))
         dbid = self._get_database_by_name(database_name).id
+        json_payload = {
+            "database_id": dbid,
+            "sql": sql,
+            "client_id": client_id,
+            "queryLimit": query_limit,
+            "sql_editor_id": sql_editor_id,
+        }
+        if tmp_table_name:
+            json_payload["tmp_table_name"] = tmp_table_name
+        if select_as_cta:
+            json_payload["select_as_cta"] = select_as_cta
+
         resp = self.get_json_resp(
-            "/superset/sql_json/",
-            raise_on_error=False,
-            json_=dict(
-                database_id=dbid,
-                sql=sql,
-                select_as_create_as=False,
-                client_id=client_id,
-                queryLimit=query_limit,
-                sql_editor_id=sql_editor_id,
-            ),
+            "/superset/sql_json/", raise_on_error=False, json_=json_payload
         )
         if raise_on_error and "error" in resp:
             raise Exception("run_sql failed")
@@ -246,7 +268,7 @@ class SupersetTestCase(TestCase):
             cls=models.Database,
             criteria={"database_name": database_name},
             session=db.session,
-            sqlalchemy_uri="sqlite://test",
+            sqlalchemy_uri="sqlite:///:memory:",
             id=db_id,
             extra=extra,
         )

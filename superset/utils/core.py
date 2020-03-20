@@ -22,6 +22,7 @@ import functools
 import json
 import logging
 import os
+import re
 import signal
 import smtplib
 import traceback
@@ -35,18 +36,19 @@ from email.mime.text import MIMEText
 from email.utils import formatdate
 from enum import Enum
 from time import struct_time
-from typing import Any, Dict, Iterator, List, NamedTuple, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, List, NamedTuple, Optional, Set, Tuple, Union
 from urllib.parse import unquote_plus
 
 import bleach
 import markdown as md
-import numpy
+import numpy as np
 import pandas as pd
 import parsedatetime
 import sqlalchemy as sa
 from dateutil.parser import parse
 from dateutil.relativedelta import relativedelta
-from flask import current_app, flash, g, Markup, render_template
+from flask import current_app, flash, Flask, g, Markup, render_template
+from flask_appbuilder import SQLA
 from flask_appbuilder.security.sqla.models import User
 from flask_babel import gettext as __, lazy_gettext as _
 from sqlalchemy import event, exc, select, Text
@@ -64,13 +66,12 @@ except ImportError:
 
 
 logging.getLogger("MARKDOWN").setLevel(logging.INFO)
+logger = logging.getLogger(__name__)
 
 DTTM_ALIAS = "__timestamp"
 ADHOC_METRIC_EXPRESSION_TYPES = {"SIMPLE": "SIMPLE", "SQL": "SQL"}
 
 JS_MAX_INTEGER = 9007199254740991  # Largest int Java Script can handle 2^53-1
-
-sources = {"chart": 0, "dashboard": 1, "sql_lab": 2}
 
 try:
     # Having might not have been imported.
@@ -98,9 +99,9 @@ def flasher(msg, severity=None):
         flash(msg, severity)
     except RuntimeError:
         if severity == "danger":
-            logging.error(msg)
+            logger.error(msg)
         else:
-            logging.info(msg)
+            logger.info(msg)
 
 
 class _memoized:
@@ -241,7 +242,7 @@ def parse_human_datetime(s):
                 parsed_dttm = parsed_dttm.replace(hour=0, minute=0, second=0)
             dttm = dttm_from_timetuple(parsed_dttm.utctimetuple())
         except Exception as e:
-            logging.exception(e)
+            logger.exception(e)
             raise ValueError("Couldn't parse date string [{}]".format(s))
     return dttm
 
@@ -343,10 +344,12 @@ def format_timedelta(td: timedelta) -> str:
 def base_json_conv(obj):
     if isinstance(obj, memoryview):
         obj = obj.tobytes()
-    if isinstance(obj, numpy.int64):
+    if isinstance(obj, np.int64):
         return int(obj)
-    elif isinstance(obj, numpy.bool_):
+    elif isinstance(obj, np.bool_):
         return bool(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
     elif isinstance(obj, set):
         return list(obj)
     elif isinstance(obj, decimal.Decimal):
@@ -410,7 +413,7 @@ def json_dumps_w_dates(payload):
     return json.dumps(payload, default=json_int_dttm_ser)
 
 
-def error_msg_from_exception(e):
+def error_msg_from_exception(e: Exception) -> str:
     """Translate exception into error message
 
     Database have different ways to handle exception. This function attempts
@@ -426,10 +429,10 @@ def error_msg_from_exception(e):
     """
     msg = ""
     if hasattr(e, "message"):
-        if isinstance(e.message, dict):
-            msg = e.message.get("message")
-        elif e.message:
-            msg = e.message
+        if isinstance(e.message, dict):  # type: ignore
+            msg = e.message.get("message")  # type: ignore
+        elif e.message:  # type: ignore
+            msg = e.message  # type: ignore
     return msg or str(e)
 
 
@@ -485,7 +488,9 @@ def readfile(file_path: str) -> Optional[str]:
     return content
 
 
-def generic_find_constraint_name(table, columns, referenced, db):
+def generic_find_constraint_name(
+    table: str, columns: Set[str], referenced: str, db: SQLA
+):
     """Utility to find a constraint name in alembic migrations"""
     t = sa.Table(table, db.metadata, autoload=True, autoload_with=db.engine)
 
@@ -494,7 +499,9 @@ def generic_find_constraint_name(table, columns, referenced, db):
             return fk.name
 
 
-def generic_find_fk_constraint_name(table, columns, referenced, insp):
+def generic_find_fk_constraint_name(
+    table: str, columns: Set[str], referenced: str, insp
+):
     """Utility to find a foreign-key constraint name in alembic migrations"""
     for fk in insp.get_foreign_keys(table):
         if (
@@ -537,7 +544,7 @@ def validate_json(obj):
         try:
             json.loads(obj)
         except Exception as e:
-            logging.error(f"JSON is not valid {e}")
+            logger.error(f"JSON is not valid {e}")
             raise SupersetException("JSON is not valid")
 
 
@@ -561,7 +568,7 @@ class timeout:
         self.error_message = error_message
 
     def handle_timeout(self, signum, frame):
-        logging.error("Process timed out")
+        logger.error("Process timed out")
         raise SupersetTimeoutException(self.error_message)
 
     def __enter__(self):
@@ -569,15 +576,15 @@ class timeout:
             signal.signal(signal.SIGALRM, self.handle_timeout)
             signal.alarm(self.seconds)
         except ValueError as e:
-            logging.warning("timeout can't be used in the current context")
-            logging.exception(e)
+            logger.warning("timeout can't be used in the current context")
+            logger.exception(e)
 
     def __exit__(self, type, value, traceback):
         try:
             signal.alarm(0)
         except ValueError as e:
-            logging.warning("timeout can't be used in the current context")
-            logging.exception(e)
+            logger.warning("timeout can't be used in the current context")
+            logger.exception(e)
 
 
 def pessimistic_connection_handling(some_engine):
@@ -633,7 +640,7 @@ def notify_user_about_perm_udate(granter, user, role, datasource, tpl_name, conf
     msg = render_template(
         tpl_name, granter=granter, user=user, role=role, datasource=datasource
     )
-    logging.info(msg)
+    logger.info(msg)
     subject = __(
         "[Superset] Access to the datasource %(name)s was granted",
         name=datasource.full_name,
@@ -739,12 +746,12 @@ def send_MIME_email(e_from, e_to, mime_msg, config, dryrun=False):
             s.starttls()
         if SMTP_USER and SMTP_PASSWORD:
             s.login(SMTP_USER, SMTP_PASSWORD)
-        logging.info("Sent an email to " + str(e_to))
+        logger.info("Sent an email to " + str(e_to))
         s.sendmail(e_from, e_to, mime_msg.as_string())
         s.quit()
     else:
-        logging.info("Dryrun enabled, email notification content is below:")
-        logging.info(mime_msg.as_string())
+        logger.info("Dryrun enabled, email notification content is below:")
+        logger.info(mime_msg.as_string())
 
 
 def get_email_address_list(address_string: str) -> List[str]:
@@ -916,8 +923,9 @@ def get_or_create_db(database_name, sqlalchemy_uri, *args, **kwargs):
     database = (
         db.session.query(models.Database).filter_by(database_name=database_name).first()
     )
+
     if not database:
-        logging.info(f"Creating database reference for {database_name}")
+        logger.info(f"Creating database reference for {database_name}")
         database = models.Database(database_name=database_name, *args, **kwargs)
         db.session.add(database)
 
@@ -934,7 +942,7 @@ def get_example_database():
 
 
 def is_adhoc_metric(metric) -> bool:
-    return (
+    return bool(
         isinstance(metric, dict)
         and (
             (
@@ -1203,6 +1211,17 @@ def split(
     yield s[i:]
 
 
+def get_iterable(x: Any) -> List:
+    """
+    Get an iterable (list) representation of the object.
+
+    :param x: The object
+    :returns: An iterable representation
+    """
+
+    return x if isinstance(x, list) else [x]
+
+
 class TimeRangeEndpoint(str, Enum):
     """
     The time range endpoint types which represent inclusive, exclusive, or unknown.
@@ -1219,7 +1238,7 @@ class TimeRangeEndpoint(str, Enum):
     UNKNOWN = "unknown"
 
 
-class ReservedUrlParameters(Enum):
+class ReservedUrlParameters(str, Enum):
     """
     Reserved URL parameters that are used internally by Superset. These will not be
     passed to chart queries, as they control the behavior of the UI.
@@ -1227,3 +1246,23 @@ class ReservedUrlParameters(Enum):
 
     STANDALONE = "standalone"
     EDIT_MODE = "edit"
+
+
+class QuerySource(Enum):
+    """
+    The source of a SQL query.
+    """
+
+    CHART = 0
+    DASHBOARD = 1
+    SQL_LAB = 2
+
+
+class DbColumnType(Enum):
+    """
+    Generic database column type
+    """
+
+    NUMERIC = 0
+    STRING = 1
+    TEMPORAL = 2

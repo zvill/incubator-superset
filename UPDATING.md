@@ -23,7 +23,46 @@ assists people when migrating to a new version.
 
 ## Next
 
-* [8732](https://github.com/apache/incubator-superset/pull/8732): Swagger user interface is now enabled by default. 
+* [8867](https://github.com/apache/incubator-superset/pull/8867): a change which adds the `tmp_schema_name` column to the `query` table which requires locking the table. Given the `query` table is heavily used performance may be degraded during the migration. Scheduled downtime may be advised.
+
+* [9238](https://github.com/apache/incubator-superset/pull/9238): the config option `TIME_GRAIN_FUNCTIONS` has been renamed to `TIME_GRAIN_EXPRESSIONS` to better reflect the content of the dictionary.
+
+* [9218](https://github.com/apache/incubator-superset/pull/9218): SQLite connections have been disabled by default
+for analytics databases. You can optionally enable SQLite by setting `PREVENT_UNSAFE_DB_CONNECTIONS` to `False`.
+It is not recommended to change this setting, as arbitrary SQLite connections can lead to security vulnerabilities.
+
+* [9133](https://github.com/apache/incubator-superset/pull/9133): Security list of permissions and list views has been
+disable by default. You can optionally enable them back again by setting the following config keys:
+`FAB_ADD_SECURITY_PERMISSION_VIEW`, `FAB_ADD_SECURITY_VIEW_MENU_VIEW`, `FAB_ADD_SECURITY_PERMISSION_VIEWS_VIEW` to `True`.
+
+* [9173](https://github.com/apache/incubator-superset/pull/9173): Changes the encoding of the query source from an int to an enum.
+
+* [9120](https://github.com/apache/incubator-superset/pull/9120): Changes the default behavior of ad-hoc sharing of
+queries in SQLLab to one that links to the saved query rather than one that copies the query data into the KVStore
+model and links to the record there. This is a security-related change that makes SQLLab query
+sharing respect the existing role-based access controls. Should you wish to retain the existing behavior, set two feature flags:
+`"KV_STORE": True` will re-enable the `/kv/` and `/kv/store/` endpoints, and `"SHARE_QUERIES_VIA_KV_STORE": True`
+will tell the front-end to utilize them for query sharing.
+
+* [9109](https://github.com/apache/incubator-superset/pull/9109): Expire `filter_immune_slices` and
+`filter_immune_filter_fields` to favor dashboard scoped filter metadata `filter_scopes`.
+
+* [9046](https://github.com/apache/incubator-superset/pull/9046): Replaces `can_only_access_owned_queries` by
+`all_query_access` favoring a white list approach. Since a new permission is introduced use `superset init`
+to create and associate it by default to the `Admin` role. Note that, by default, all non `Admin` users will
+not be able to access queries they do not own.
+
+* [8901](https://github.com/apache/incubator-superset/pull/8901): The datasource's update
+timestamp has been added to the query object's cache key to ensure updates to
+datasources are always reflected in associated query results. As a consequence all
+previously cached results will be invalidated when updating to the next version.
+
+* [8699](https://github.com/apache/incubator-superset/pull/8699): A `row_level_security_filters`
+table has been added, which is many-to-many with `tables` and `ab_roles`.  The applicable filters
+are added to the sqla query, and the RLS ids are added to the query cache keys. If RLS is enabled in config.py (`ENABLE_ROW_LEVEL_SECURITY = True`; by default, it is disabled), they can be
+accessed through the `Security` menu, or when editting a table.
+
+* [8732](https://github.com/apache/incubator-superset/pull/8732): Swagger user interface is now enabled by default.
 A new permission `show on SwaggerView` is created by `superset init` and given to the `Admin` Role. To disable the UI,
 set `FAB_API_SWAGGER_UI = False` on config.
 
@@ -41,6 +80,13 @@ now uses UTC for the tooltips and default placeholder timestamps (sans timezone)
 * [8418](https://github.com/apache/incubator-superset/pull/8418): FLASK_APP / Worker App
 have changed. FLASK_APP should be updated to `superset.app:create_app()` and Celery Workers
 should be started with `--app=superset.tasks.celery_app:app`
+
+* [9017](https://github.com/apache/incubator-superset/pull/9017): `SIP_15_ENABLED` now
+defaults to True which ensures that for all new SQL charts the time filter will behave
+like [start, end). Existing deployments should either disable this feature to keep the
+status quo or inform their users of this change prior to enabling the flag. The
+`SIP_15_GRACE_PERIOD_END` option provides a mechanism for specifying how long chart
+owners have to migrate their charts (the default is indefinite).
 
 ## 0.35.0
 
@@ -90,9 +136,9 @@ which adds missing non-nullable fields to the `datasources` table. Depending on
 the integrity of the data, manual intervention may be required.
 
 * [5452](https://github.com/apache/incubator-superset/pull/5452): a change
-which adds missing non-nullable fields and uniqueness constraints (which may be 
-case insensitive depending on your database configuration) to the `columns`and 
-`table_columns` tables. Depending on the integrity of the data, manual 
+which adds missing non-nullable fields and uniqueness constraints (which may be
+case insensitive depending on your database configuration) to the `columns`and
+`table_columns` tables. Depending on the integrity of the data, manual
 intervention may be required.
 * `fabmanager` command line is deprecated since Flask-AppBuilder 2.0.0, use
 the new `flask fab <command>` integrated with *Flask cli*.
@@ -100,7 +146,7 @@ the new `flask fab <command>` integrated with *Flask cli*.
 `FAB_UPDATE_PERMS` config boolean key. To disable automatic
 creation of permissions set `FAB_UPDATE_PERMS = False` on config.
 * [5453](https://github.com/apache/incubator-superset/pull/5453): a change
-which adds missing non-nullable fields and uniqueness constraints (which may be 
+which adds missing non-nullable fields and uniqueness constraints (which may be
 case insensitive depending on your database configuration) to the metrics
 and sql_metrics tables. Depending on the integrity of the data, manual
 intervention may be required.
@@ -148,6 +194,8 @@ the deploy finishes).
 ## Superset 0.29.0
 * India was removed from the "Country Map" visualization as the geojson
   file included in the package was very large
+
+* [5933](https://github.com/apache/incubator-superset/pull/5933)/[6078](https://github.com/apache/incubator-superset/pull/6078): changes which add schema and table metadata cache timeout logic at the database level. If left undefined caching of metadata is disabled.
 
 ## Superset 0.28.0
 * Support for Python 2 is deprecated, we only support >=3.6 from
