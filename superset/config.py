@@ -34,6 +34,9 @@ from celery.schedules import crontab
 from dateutil import tz
 from flask_appbuilder.security.manager import AUTH_DB
 
+from superset.jinja_context import (  # pylint: disable=unused-import
+    BaseTemplateProcessor,
+)
 from superset.stats_logger import DummyStatsLogger
 from superset.typing import CacheConfig
 from superset.utils.log import DBEventLogger
@@ -284,8 +287,10 @@ DEFAULT_FEATURE_FLAGS = {
     "PRESTO_EXPAND_DATA": False,
     "REDUCE_DASHBOARD_BOOTSTRAP_PAYLOAD": False,
     "SHARE_QUERIES_VIA_KV_STORE": False,
+    "SIP_38_VIZ_REARCHITECTURE": False,
     "TAGGING_SYSTEM": False,
     "SQLLAB_BACKEND_PERSISTENCE": False,
+    "LIST_VIEWS_NEW_UI": False,
 }
 
 # This is merely a default.
@@ -301,10 +306,11 @@ FEATURE_FLAGS: Dict[str, bool] = {}
 # role-based features, or a full on A/B testing framework.
 #
 # from flask import g, request
-# def GET_FEATURE_FLAGS_FUNC(feature_flags_dict):
-#     feature_flags_dict['some_feature'] = g.user and g.user.id == 5
+# def GET_FEATURE_FLAGS_FUNC(feature_flags_dict: Dict[str, bool]) -> Dict[str, bool]:
+#     if hasattr(g, "user") and g.user.is_active:
+#         feature_flags_dict['some_feature'] = g.user and g.user.id == 5
 #     return feature_flags_dict
-GET_FEATURE_FLAGS_FUNC = None
+GET_FEATURE_FLAGS_FUNC: Optional[Callable[[Dict[str, bool]], Dict[str, bool]]] = None
 
 
 # ---------------------------------------------------
@@ -584,6 +590,13 @@ UPLOADED_CSV_HIVE_NAMESPACE = None
 # dictionary.
 JINJA_CONTEXT_ADDONS: Dict[str, Callable] = {}
 
+# A dictionary of macro template processors that gets merged into global
+# template processors. The existing template processors get updated with this
+# dictionary, which means the existing keys get overwritten by the content of this
+# dictionary. The customized addons don't necessarily need to use jinjia templating
+# language. This allows you to define custom logic to process macro template.
+CUSTOM_TEMPLATE_PROCESSORS = {}  # type: Dict[str, BaseTemplateProcessor]
+
 # Roles that are controlled by the API / Superset and should not be changes
 # by humans.
 ROBOT_PERMISSION_ROLES = ["Public", "Gamma", "Alpha", "Admin", "sql_lab"]
@@ -796,6 +809,11 @@ SQLALCHEMY_EXAMPLES_URI = None
 # Typically these should not be allowed.
 PREVENT_UNSAFE_DB_CONNECTIONS = True
 
+# Path used to store SSL certificates that are generated when using custom certs.
+# Defaults to temporary directory.
+# Example: SSL_CERT_PATH = "/certs"
+SSL_CERT_PATH: Optional[str] = None
+
 # SIP-15 should be enabled for all new Superset deployments which ensures that the time
 # range endpoints adhere to [start, end). For existing deployments admins should provide
 # a dedicated period of time to allow chart producers to update their charts before
@@ -807,8 +825,8 @@ SIP_15_ENABLED = True
 SIP_15_GRACE_PERIOD_END: Optional[date] = None  # exclusive
 SIP_15_DEFAULT_TIME_RANGE_ENDPOINTS = ["unknown", "inclusive"]
 SIP_15_TOAST_MESSAGE = (
-    "Action Required: Preview then save your chart using the"
-    'new time range endpoints <a target="_blank" href="{url}"'
+    "Action Required: Preview then save your chart using the "
+    'new time range endpoints <a target="_blank" href="{url}" '
     'class="alert-link">here</a>.'
 )
 

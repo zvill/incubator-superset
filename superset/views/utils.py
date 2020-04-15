@@ -23,13 +23,19 @@ import simplejson as json
 from flask import request
 
 import superset.models.core as models
-from superset import app, db, viz
+from superset import app, db, is_feature_enabled
 from superset.connectors.connector_registry import ConnectorRegistry
 from superset.exceptions import SupersetException
 from superset.legacy import update_time_range
 from superset.models.dashboard import Dashboard
 from superset.models.slice import Slice
 from superset.utils.core import QueryStatus, TimeRangeEndpoint
+
+if is_feature_enabled("SIP_38_VIZ_REARCHITECTURE"):
+    from superset import viz_sip38 as viz  # type: ignore
+else:
+    from superset import viz  # type: ignore
+
 
 FORM_DATA_KEY_BLACKLIST: List[str] = []
 if not app.config["ENABLE_JAVASCRIPT_CONTROLS"]:
@@ -80,12 +86,11 @@ def get_permissions(user):
 
 
 def get_viz(
-    slice_id=None, form_data=None, datasource_type=None, datasource_id=None, force=False
+    form_data: Dict[str, Any],
+    datasource_type: str,
+    datasource_id: int,
+    force: bool = False,
 ):
-    if slice_id:
-        slc = db.session.query(Slice).filter_by(id=slice_id).one()
-        return slc.get_viz()
-
     viz_type = form_data.get("viz_type", "table")
     datasource = ConnectorRegistry.get_datasource(
         datasource_type, datasource_id, db.session
@@ -223,8 +228,9 @@ def get_time_range_endpoints(
     Note under certain circumstances the slice object may not exist, however the slice
     ID may be defined which serves as a fallback.
 
-    When SIP-15 is enabled all slices and will the [start, end) interval. If the grace
-    period is defined and has ended all slices will adhere to the [start, end) interval.
+    When SIP-15 is enabled all new slices will use the [start, end) interval. If the
+    grace period is defined and has ended all slices will adhere to the [start, end)
+    interval.
 
     :param form_data: The form-data
     :param slc: The slice
