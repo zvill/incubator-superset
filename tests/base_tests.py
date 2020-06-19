@@ -18,16 +18,18 @@
 """Unit tests for Superset"""
 import imp
 import json
-from typing import Union, Dict
+from typing import Any, Dict, Union, List
 from unittest.mock import Mock, patch
 
 import pandas as pd
 from flask import Response
 from flask_appbuilder.security.sqla import models as ab_models
 from flask_testing import TestCase
+from sqlalchemy.orm import Session
 
 from tests.test_app import app  # isort:skip
 from superset import db, security_manager
+from superset.connectors.base.models import BaseDatasource
 from superset.connectors.druid.models import DruidCluster, DruidDatasource
 from superset.connectors.sqla.models import SqlaTable
 from superset.models import core as models
@@ -55,6 +57,24 @@ class SupersetTestCase(TestCase):
 
     def create_app(self):
         return app
+
+    @staticmethod
+    def create_user_with_roles(username: str, roles: List[str]):
+        user_to_create = security_manager.find_user(username)
+        if not user_to_create:
+            security_manager.add_user(
+                username,
+                username,
+                username,
+                f"{username}@superset.com",
+                security_manager.find_role("Gamma"),  # it needs a role
+                password="general",
+            )
+            db.session.commit()
+            user_to_create = security_manager.find_user(username)
+            assert user_to_create
+        user_to_create.roles = [security_manager.find_role(r) for r in roles]
+        db.session.commit()
 
     @staticmethod
     def create_user(
@@ -103,7 +123,8 @@ class SupersetTestCase(TestCase):
                 session.add(druid_datasource2)
                 session.commit()
 
-    def get_table(self, table_id):
+    @staticmethod
+    def get_table_by_id(table_id: int) -> SqlaTable:
         return db.session.query(SqlaTable).filter_by(id=table_id).one()
 
     @staticmethod
@@ -127,21 +148,25 @@ class SupersetTestCase(TestCase):
         resp = self.get_resp("/login/", data=dict(username=username, password=password))
         self.assertNotIn("User confirmation needed", resp)
 
-    def get_slice(self, slice_name, session):
+    def get_slice(self, slice_name: str, session: Session) -> Slice:
         slc = session.query(Slice).filter_by(slice_name=slice_name).one()
         session.expunge_all()
         return slc
 
-    def get_table_by_name(self, name):
+    @staticmethod
+    def get_table_by_name(name: str) -> SqlaTable:
         return db.session.query(SqlaTable).filter_by(table_name=name).one()
 
-    def get_database_by_id(self, db_id):
+    @staticmethod
+    def get_database_by_id(db_id: int) -> Database:
         return db.session.query(Database).filter_by(id=db_id).one()
 
-    def get_druid_ds_by_name(self, name):
+    @staticmethod
+    def get_druid_ds_by_name(name: str) -> DruidDatasource:
         return db.session.query(DruidDatasource).filter_by(datasource_name=name).first()
 
-    def get_datasource_mock(self):
+    @staticmethod
+    def get_datasource_mock() -> BaseDatasource:
         datasource = Mock()
         results = Mock()
         results.query = Mock()
@@ -233,6 +258,7 @@ class SupersetTestCase(TestCase):
         sql_editor_id=None,
         select_as_cta=False,
         tmp_table_name=None,
+        schema=None,
     ):
         if user_name:
             self.logout()
@@ -249,6 +275,8 @@ class SupersetTestCase(TestCase):
             json_payload["tmp_table_name"] = tmp_table_name
         if select_as_cta:
             json_payload["select_as_cta"] = select_as_cta
+        if schema:
+            json_payload["schema"] = schema
 
         resp = self.get_json_resp(
             "/superset/sql_json/", raise_on_error=False, json_=json_payload
@@ -369,7 +397,9 @@ class SupersetTestCase(TestCase):
             mock_method.assert_called_once_with("error", func_name)
         return rv
 
-    def post_assert_metric(self, uri: str, data: Dict, func_name: str) -> Response:
+    def post_assert_metric(
+        self, uri: str, data: Dict[str, Any], func_name: str
+    ) -> Response:
         """
         Simple client post with an extra assertion for statsd metrics
 
@@ -389,7 +419,9 @@ class SupersetTestCase(TestCase):
             mock_method.assert_called_once_with("error", func_name)
         return rv
 
-    def put_assert_metric(self, uri: str, data: Dict, func_name: str) -> Response:
+    def put_assert_metric(
+        self, uri: str, data: Dict[str, Any], func_name: str
+    ) -> Response:
         """
         Simple client put with an extra assertion for statsd metrics
 
