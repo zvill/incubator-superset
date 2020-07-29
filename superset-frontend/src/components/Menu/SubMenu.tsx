@@ -18,37 +18,28 @@
  */
 import React from 'react';
 import styled from '@superset-ui/style';
-import { Button, Nav, Navbar, MenuItem } from 'react-bootstrap';
+import { Nav, Navbar, MenuItem } from 'react-bootstrap';
+import Button, { OnClickHandler } from 'src/components/Button';
 
 const StyledHeader = styled.header`
   margin-top: -20px;
   .navbar-header .navbar-brand {
     font-weight: ${({ theme }) => theme.typography.weights.bold};
   }
-
   .navbar-right {
-    .btn-default {
-      background-color: ${({ theme }) => theme.colors.primary.base};
-      border-radius: 4px;
-      border: none;
-      color: ${({ theme }) => theme.colors.secondary.light5};
-      font-size: ${({ theme }) => theme.typography.sizes.s};
-      font-weight: ${({ theme }) => theme.typography.weights.bold};
-      margin: 8px 43px;
-      padding: 8px 51px 8px 43px;
-      text-transform: uppercase;
-      i {
-        padding: 4px ${({ theme }) => theme.typography.sizes.xs};
-      }
+    .supersetButton {
+      margin: ${({ theme }) =>
+        `${theme.gridUnit * 2}px ${theme.gridUnit * 4}px ${
+          theme.gridUnit * 2
+        }px 0`};
     }
   }
-
   .navbar-nav {
     li {
       a {
         font-size: ${({ theme }) => theme.typography.sizes.s};
-        padding: 8px;
-        margin: 8px;
+        padding: ${({ theme }) => theme.gridUnit * 2}px;
+        margin: ${({ theme }) => theme.gridUnit * 2}px;
         color: ${({ theme }) => theme.colors.secondary.dark1};
       }
     }
@@ -62,61 +53,66 @@ const StyledHeader = styled.header`
   }
 `;
 
-interface Props {
-  createButton: { name: string; url: string | null };
-  canCreate: boolean;
+type MenuChild = {
   label: string;
   name: string;
-  childs: Array<{ label: string; name: string; url: string }>;
+  url: string;
+};
+
+export interface SubMenuProps {
+  primaryButton?: {
+    name: React.ReactNode;
+    onClick: OnClickHandler;
+  };
+  secondaryButton?: {
+    name: React.ReactNode;
+    onClick: OnClickHandler;
+  };
+  name: string;
+  children?: MenuChild[];
+  activeChild?: MenuChild['name'];
 }
 
-interface State {
-  selectedMenu: string;
-}
-
-class SubMenu extends React.PureComponent<Props, State> {
-  state: State = {
-    selectedMenu: this.props.childs[0] && this.props.childs[0].label,
-  };
-
-  handleClick = (item: string) => () => {
-    this.setState({ selectedMenu: item });
-  };
-
-  render() {
-    const { canCreate, childs, label, createButton } = this.props;
-
-    return (
-      <StyledHeader>
-        <Navbar inverse fluid role="navigation">
-          <Navbar.Header>
-            <Navbar.Brand>{label}</Navbar.Brand>
-          </Navbar.Header>
-          <Nav>
-            {childs &&
-              childs.map(child => (
-                <MenuItem
-                  active={child.label === this.state.selectedMenu}
-                  key={`${child.label}`}
-                  eventKey={`${child.name}`}
-                  href={child.url}
-                  onClick={this.handleClick(child.label)}
-                >
-                  {child.label}
-                </MenuItem>
-              ))}
-          </Nav>
-          {canCreate && (
-            <Nav className="navbar-right">
-              <Button href={`${createButton.url}`}>
-                <i className="fa fa-plus" /> {createButton.name}
-              </Button>
-            </Nav>
+const SubMenu: React.FunctionComponent<SubMenuProps> = props => {
+  return (
+    <StyledHeader>
+      <Navbar inverse fluid role="navigation">
+        <Navbar.Header>
+          <Navbar.Brand>{props.name}</Navbar.Brand>
+        </Navbar.Header>
+        <Nav>
+          {props.children &&
+            props.children.map(child => (
+              <MenuItem
+                active={child.name === props.activeChild}
+                key={`${child.label}`}
+                href={child.url}
+              >
+                {child.label}
+              </MenuItem>
+            ))}
+        </Nav>
+        <Nav className="navbar-right">
+          {props.secondaryButton && (
+            <Button
+              className="supersetButton secondary"
+              onClick={props.secondaryButton.onClick}
+            >
+              {props.secondaryButton.name}
+            </Button>
           )}
-        </Navbar>
-      </StyledHeader>
-    );
-  }
-}
+          {props.primaryButton && (
+            <Button
+              className="supersetButton primary"
+              onClick={props.primaryButton.onClick}
+            >
+              {props.primaryButton.name}
+            </Button>
+          )}
+        </Nav>
+      </Navbar>
+    </StyledHeader>
+  );
+};
 
 export default SubMenu;

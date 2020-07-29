@@ -26,10 +26,6 @@
   color: @danger;
 }
 
-.label {
-  font-size: 100%;
-}
-
 .no-wrap {
   white-space: nowrap;
 }
@@ -151,12 +147,6 @@ div.navbar {
   .tooltip-inner {
     max-width: 350px;
   }
-}
-
-img.loading {
-  width: 40px;
-  position: relative;
-  margin: 10px;
 }
 
 img.viz-thumb-option {
@@ -334,6 +324,10 @@ table.table-no-hover tr:hover {
 
 .m-b-10 {
   margin-bottom: 10px;
+}
+
+.m-l-4 {
+  margin-left: 4px;
 }
 
 .m-l-5 {
@@ -531,27 +525,6 @@ tr.reactable-column-header th.reactable-header-sortable {
   padding-right: 17px;
 }
 
-.explore-chart-overlay {
-  position: absolute;
-  z-index: @z-index-above-dashboard-charts;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-}
-
-.refresh-overlay-btn {
-  font-weight: @font-weight-bold;
-  margin-right: 10px;
-}
-
-.dismiss-overlay-btn {
-  font-weight: @font-weight-bold;
-  background: @lightest;
-  color: @brand-primary;
-  border-color: @brand-primary;
-}
-
 .fave-unfave-icon {
   .fa-star-o,
   .fa-star {
@@ -582,4 +555,44 @@ td.filtered {
 }
 .select2-container-multi {
   width: 100% !important;
+}
+
+// Remove this when the jinja menu/navbar is replaced with react.
+// This style already exists in that view
+.navbar-brand {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+// Making native radio buttons use brand color
+input[type='radio']:after {
+  width: 15px;
+  height: 15px;
+  border-radius: 15px;
+  top: -2px;
+  left: -1px;
+  position: relative;
+  background-color: #fff;
+  content: '';
+  display: inline-block;
+  visibility: visible;
+  border: 2px solid @gray;
+}
+
+input[type='radio']:checked:after {
+  width: 15px;
+  height: 15px;
+  border-radius: 15px;
+  top: -2px;
+  left: -1px;
+  position: relative;
+  background-color: #fff;
+  content: '';
+  display: inline-block;
+  visibility: visible;
+  border: 5px solid @brand-primary;
+}
+hr {
+  border-top: 1px solid @gray-light;
 }

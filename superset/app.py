@@ -24,7 +24,6 @@ from flask import Flask, redirect
 from flask_appbuilder import expose, IndexView
 from flask_babel import gettext as __, lazy_gettext as _
 from flask_compress import Compress
-from flask_wtf import CSRFProtect
 
 from superset.connectors.connector_registry import ConnectorRegistry
 from superset.extensions import (
@@ -33,6 +32,7 @@ from superset.extensions import (
     appbuilder,
     cache_manager,
     celery_app,
+    csrf,
     db,
     feature_flag_manager,
     jinja_context_manager,
@@ -158,8 +158,12 @@ class SupersetAppInitializer:
             Dashboard,
             DashboardModelViewAsync,
         )
-        from superset.views.database.api import DatabaseRestApi
-        from superset.views.database.views import DatabaseView, CsvToDatabaseView
+        from superset.databases.api import DatabaseRestApi
+        from superset.views.database.views import (
+            DatabaseView,
+            CsvToDatabaseView,
+            ExcelToDatabaseView,
+        )
         from superset.views.datasource import Datasource
         from superset.views.log.api import LogRestApi
         from superset.views.log.views import LogModelView
@@ -167,8 +171,11 @@ class SupersetAppInitializer:
             DashboardEmailScheduleView,
             SliceEmailScheduleView,
         )
+        from superset.views.alerts import (
+            AlertModelView,
+            AlertLogModelView,
+        )
         from superset.views.sql_lab import (
-            QueryView,
             SavedQueryViewApi,
             SavedQueryView,
             TabStateView,
@@ -241,14 +248,6 @@ class SupersetAppInitializer:
             category_label=__("Manage"),
             category_icon="",
         )
-        appbuilder.add_view(
-            QueryView,
-            "Queries",
-            label=__("Queries"),
-            category="Manage",
-            category_label=__("Manage"),
-            icon="fa-search",
-        )
         if self.config["ENABLE_ROW_LEVEL_SECURITY"]:
             appbuilder.add_view(
                 RowLevelSecurityFiltersModelView,
@@ -265,6 +264,7 @@ class SupersetAppInitializer:
         appbuilder.add_view_no_menu(Api)
         appbuilder.add_view_no_menu(CssTemplateAsyncModelView)
         appbuilder.add_view_no_menu(CsvToDatabaseView)
+        appbuilder.add_view_no_menu(ExcelToDatabaseView)
         appbuilder.add_view_no_menu(Dashboard)
         appbuilder.add_view_no_menu(DashboardModelViewAsync)
         appbuilder.add_view_no_menu(Datasource)
@@ -324,15 +324,35 @@ class SupersetAppInitializer:
             category="SQL Lab",
             category_label=__("SQL Lab"),
         )
-        appbuilder.add_link(
-            "Upload a CSV",
-            label=__("Upload a CSV"),
-            href="/csvtodatabaseview/form",
-            icon="fa-upload",
-            category="Sources",
-            category_label=__("Sources"),
-            category_icon="fa-wrench",
-        )
+        if self.config["CSV_EXTENSIONS"].intersection(
+            self.config["ALLOWED_EXTENSIONS"]
+        ):
+            appbuilder.add_link(
+                "Upload a CSV",
+                label=__("Upload a CSV"),
+                href="/csvtodatabaseview/form",
+                icon="fa-upload",
+                category="Sources",
+                category_label=__("Sources"),
+                category_icon="fa-wrench",
+            )
+        try:
+            import xlrd  # pylint: disable=unused-import
+
+            if self.config["EXCEL_EXTENSIONS"].intersection(
+                self.config["ALLOWED_EXTENSIONS"]
+            ):
+                appbuilder.add_link(
+                    "Upload Excel",
+                    label=__("Upload Excel"),
+                    href="/exceltodatabaseview/form",
+                    icon="fa-upload",
+                    category="Sources",
+                    category_label=__("Sources"),
+                    category_icon="fa-wrench",
+                )
+        except ImportError:
+            pass
 
         #
         # Conditionally setup log views
@@ -369,6 +389,17 @@ class SupersetAppInitializer:
                 category_label=__("Manage"),
                 icon="fa-search",
             )
+
+        if self.config["ENABLE_ALERTS"]:
+            appbuilder.add_view(
+                AlertModelView,
+                "Alerts",
+                label=__("Alerts"),
+                category="Manage",
+                category_label=__("Manage"),
+                icon="fa-exclamation-triangle",
+            )
+            appbuilder.add_view_no_menu(AlertLogModelView)
 
         #
         # Conditionally add Access Request Model View
@@ -563,8 +594,7 @@ class SupersetAppInitializer:
             )
 
         # Flask-Compress
-        if self.config["ENABLE_FLASK_COMPRESS"]:
-            Compress(self.flask_app)
+        Compress(self.flask_app)
 
         if self.config["TALISMAN_ENABLED"]:
             talisman.init_app(self.flask_app, **self.config["TALISMAN_CONFIG"])
@@ -584,7 +614,7 @@ class SupersetAppInitializer:
 
     def configure_wtf(self) -> None:
         if self.config["WTF_CSRF_ENABLED"]:
-            csrf = CSRFProtect(self.flask_app)
+            csrf.init_app(self.flask_app)
             csrf_exempt_list = self.config["WTF_CSRF_EXEMPT_LIST"]
             for ex in csrf_exempt_list:
                 csrf.exempt(ex)

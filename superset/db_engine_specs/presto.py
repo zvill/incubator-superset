@@ -22,7 +22,7 @@ from collections import defaultdict, deque
 from contextlib import closing
 from datetime import datetime
 from distutils.version import StrictVersion
-from typing import Any, cast, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Any, cast, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 from urllib import parse
 
 import pandas as pd
@@ -40,6 +40,7 @@ from superset.db_engine_specs.base import BaseEngineSpec
 from superset.exceptions import SupersetTemplateException
 from superset.models.sql_lab import Query
 from superset.models.sql_types.presto_sql_types import type_map as presto_type_map
+from superset.result_set import destringify
 from superset.sql_parse import ParsedQuery
 from superset.utils import core as utils
 
@@ -50,6 +51,9 @@ if TYPE_CHECKING:
 QueryStatus = utils.QueryStatus
 config = app.config
 logger = logging.getLogger(__name__)
+
+# See here: https://github.com/dropbox/PyHive/blob/8eb0aeab8ca300f3024655419b93dad926c1a351/pyhive/presto.py#L93  # pylint: disable=line-too-long
+DEFAULT_PYHIVE_POLL_INTERVAL = 1
 
 
 def get_children(column: Dict[str, str]) -> List[Dict[str, str]]:
@@ -534,9 +538,9 @@ class PrestoEngineSpec(BaseEngineSpec):
     @classmethod
     def convert_dttm(cls, target_type: str, dttm: datetime) -> Optional[str]:
         tt = target_type.upper()
-        if tt == "DATE":
+        if tt == utils.TemporalType.DATE:
             return f"""from_iso8601_date('{dttm.date().isoformat()}')"""
-        if tt == "TIMESTAMP":
+        if tt == utils.TemporalType.TIMESTAMP:
             return f"""from_iso8601_timestamp('{dttm.isoformat(timespec="microseconds")}')"""  # pylint: disable=line-too-long
         return None
 
@@ -565,7 +569,7 @@ class PrestoEngineSpec(BaseEngineSpec):
         return datasource_names
 
     @classmethod
-    def expand_data(  # pylint: disable=too-many-locals
+    def expand_data(  # pylint: disable=too-many-locals,too-many-branches
         cls, columns: List[Dict[Any, Any]], data: List[Dict[Any, Any]]
     ) -> Tuple[List[Dict[Any, Any]], List[Dict[Any, Any]], List[Dict[Any, Any]]]:
         """
@@ -613,6 +617,7 @@ class PrestoEngineSpec(BaseEngineSpec):
                 current_array_level = level
 
             name = column["name"]
+            values: Optional[Union[str, List[Any]]]
 
             if column["type"].startswith("ARRAY("):
                 # keep processing array children; we append to the right so that
@@ -624,6 +629,8 @@ class PrestoEngineSpec(BaseEngineSpec):
                 while i < len(data):
                     row = data[i]
                     values = row.get(name)
+                    if isinstance(values, str):
+                        row[name] = values = destringify(values)
                     if values:
                         # how many extra rows we need to unnest the data?
                         extra_rows = len(values) - 1
@@ -650,12 +657,15 @@ class PrestoEngineSpec(BaseEngineSpec):
                 # expand columns; we append them to the left so they are added
                 # immediately after the parent
                 expanded = get_children(column)
-                to_process.extendleft((column, level) for column in expanded)
+                to_process.extendleft((column, level) for column in expanded[::-1])
                 expanded_columns.extend(expanded)
 
                 # expand row objects into new columns
                 for row in data:
-                    for value, col in zip(row.get(name) or [], expanded):
+                    values = row.get(name) or []
+                    if isinstance(values, str):
+                        row[name] = values = cast(List[Any], destringify(values))
+                    for value, col in zip(values, expanded):
                         row[col["name"]] = value
 
         data = [
@@ -729,6 +739,9 @@ class PrestoEngineSpec(BaseEngineSpec):
     def handle_cursor(cls, cursor: Any, query: Query, session: Session) -> None:
         """Updates progress information"""
         query_id = query.id
+        poll_interval = query.database.connect_args.get(
+            "poll_interval", DEFAULT_PYHIVE_POLL_INTERVAL
+        )
         logger.info("Query %i: Polling the cursor for progress", query_id)
         polled = cursor.poll()
         # poll returns dict -- JSON status information or ``None``
@@ -762,7 +775,7 @@ class PrestoEngineSpec(BaseEngineSpec):
                     if progress > query.progress:
                         query.progress = progress
                     session.commit()
-            time.sleep(1)
+            time.sleep(poll_interval)
             logger.info("Query %i: Polling the cursor for progress", query_id)
             polled = cursor.poll()
 

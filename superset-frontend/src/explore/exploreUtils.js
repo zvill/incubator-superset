@@ -18,7 +18,6 @@
  */
 /* eslint camelcase: 0 */
 import URI from 'urijs';
-import { SupersetClient } from '@superset-ui/connection';
 import { buildQueryContext } from '@superset-ui/query';
 import { availableDomains } from 'src/utils/hostNamesConfig';
 import { safeStringify } from 'src/utils/safeStringify';
@@ -194,8 +193,8 @@ export function getExploreUrl({
 }
 
 export const shouldUseLegacyApi = formData => {
-  const { useLegacyApi } = getChartMetadataRegistry().get(formData.viz_type);
-  return useLegacyApi || false;
+  const vizMetadata = getChartMetadataRegistry().get(formData.viz_type);
+  return vizMetadata ? vizMetadata.useLegacyApi : false;
 };
 
 export const buildV1ChartDataPayload = ({

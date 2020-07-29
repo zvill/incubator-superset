@@ -49,6 +49,7 @@ const propTypes = {
   timeout: PropTypes.number,
   vizType: PropTypes.string.isRequired,
   triggerRender: PropTypes.bool,
+  owners: PropTypes.arrayOf(PropTypes.string),
   // state
   chartAlert: PropTypes.string,
   chartStatus: PropTypes.string,
@@ -139,12 +140,26 @@ class Chart extends React.PureComponent {
   }
 
   renderErrorMessage() {
-    const { chartAlert, chartStackTrace, queryResponse } = this.props;
+    const {
+      chartAlert,
+      chartStackTrace,
+      dashboardId,
+      owners,
+      queryResponse,
+    } = this.props;
+
+    const error = queryResponse?.errors?.[0];
+    if (error) {
+      const extra = error.extra || {};
+      extra.owners = owners;
+      error.extra = extra;
+    }
     return (
       <ErrorMessageWithStackTrace
-        error={queryResponse?.errors?.[0]}
-        message={chartAlert}
+        error={error}
+        message={chartAlert || queryResponse?.message}
         link={queryResponse ? queryResponse.link : null}
+        source={dashboardId ? 'dashboard' : 'explore'}
         stackTrace={chartStackTrace}
       />
     );
@@ -182,7 +197,9 @@ class Chart extends React.PureComponent {
           className={`chart-container ${isLoading ? 'is-loading' : ''}`}
           style={containerStyles}
         >
-          {isLoading && <Loading size={50} />}
+          <div className={`slice_container ${isFaded ? ' faded' : ''}`}>
+            <ChartRenderer {...this.props} />
+          </div>
 
           {!isLoading && !chartAlert && isFaded && (
             <RefreshChartOverlay
@@ -191,9 +208,8 @@ class Chart extends React.PureComponent {
               onQuery={onQuery}
             />
           )}
-          <div className={`slice_container ${isFaded ? ' faded' : ''}`}>
-            <ChartRenderer {...this.props} />
-          </div>
+
+          {isLoading && <Loading />}
         </div>
       </ErrorBoundary>
     );
